@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PackageId>SystemLocker.Simple</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>System Locker</Authors>
+    <Description>Official System Locker Simple client for .NET — a stateless license check for software running on machines you control.</Description>
+    <PackageProjectUrl>https://github.com/systemlocker/System-Locker-Simple-NET</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/systemlocker/System-Locker-Simple-NET</RepositoryUrl>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+</Project>
