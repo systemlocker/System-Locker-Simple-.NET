@@ -14,8 +14,9 @@ public sealed class SLHwidOptions
     /// <summary>Names additional hard-locked slots beyond the default "slstore".</summary>
     public IReadOnlyList<string> ExtraMandatory { get; init; } = Array.Empty<string>();
 
-    /// <summary>Discards any stored helper data and enrolls a fresh key (new
-    /// HWID); the application must then run its server-side device reset.</summary>
+    /// <summary>Discards the shared device helper data and enrolls a fresh
+    /// key (new HWID). This affects all applications sharing the store; the
+    /// application must then run its server-side device reset.</summary>
     public bool ForceReenroll { get; init; }
 }
 

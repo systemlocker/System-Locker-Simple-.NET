@@ -45,7 +45,12 @@ internal static class SLHwidCollectors
         var bios = @"HARDWARE\DESCRIPTION\System\BIOS";
 
         Put(factors, "machine_guid", Registry(@"SOFTWARE\Microsoft\Cryptography", "MachineGuid"));
-        Put(factors, "product_uuid", Registry(@"SYSTEM\CurrentControlSet\Control\SystemInformation", "ComputerHardwareId")?.Trim('{', '}'));
+        var registryProductUuid = Registry(@"SYSTEM\CurrentControlSet\Control\SystemInformation", "ComputerHardwareId")?.Trim('{', '}');
+        Put(factors, "product_uuid", registryProductUuid);
+        // ComputerHardwareId is a Windows-derived hardware identifier, not the
+        // SMBIOS UUID exposed by CIM. Read the UUID from raw SMBIOS so toggling
+        // PowerShell/CIM availability cannot change the platform slot.
+        Put(factors, "system_uuid", SystemUuid());
         Put(factors, "board_serial", Registry(bios, "BaseBoardSerialNumber"));
         Put(factors, "cpu_id", Registry(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "Identifier"));
         Put(factors, "firmware", MultiInstance(new[]
@@ -63,16 +68,22 @@ internal static class SLHwidCollectors
         Put(factors, "gpu_id", MultiInstance(RegistrySubvalues(
             $@"SYSTEM\CurrentControlSet\Control\Class\{DisplayClassGuid}", "DriverDesc")));
         Put(factors, "monitor_edid", MultiInstance(RegistryEdidBlobs().Select(b => Convert.ToHexString(b).ToLowerInvariant())));
-        Put(factors, "disk_serial", MultiInstance(WmicColumn("diskdrive", "SerialNumber")));
+        Put(factors, "disk_serial", MultiInstance(PhysicalDiskSerials()));
         Put(factors, "ram_total", RamTotal());
         Put(factors, "volume_id", VolumeSerial());
         Put(factors, "mac", MacAddress());
 
-        // Schema-v2 signals. Legacy values above remain available because
-        // schema-v1 helpers must recover against their original inputs.
+        // Schema-v2 signals. The legacy signals above intentionally remain:
+        // existing schema-v1 helpers still need their original values to recover.
         foreach (var (name, value) in WindowsSchemaV2Factors())
         {
-            Put(factors, name, value);
+            // Native values define the cross-language representation. CIM is
+            // strictly a fallback/enrichment source and must not overwrite a
+            // value merely because PowerShell happened to work this launch.
+            if (!factors.ContainsKey(name))
+            {
+                Put(factors, name, value);
+            }
         }
         return factors;
     }
@@ -193,6 +204,185 @@ internal static class SLHwidCollectors
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx status);
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetVolumeInformation(
+        string rootPathName,
+        StringBuilder? volumeNameBuffer,
+        int volumeNameSize,
+        out uint volumeSerialNumber,
+        out uint maximumComponentLength,
+        out uint fileSystemFlags,
+        StringBuilder? fileSystemNameBuffer,
+        int fileSystemNameSize);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint CreateFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        nint securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        nint templateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeviceIoControl(
+        nint device,
+        uint controlCode,
+        byte[] input,
+        uint inputSize,
+        byte[] output,
+        uint outputSize,
+        out uint bytesReturned,
+        nint overlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(nint handle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint GetSystemFirmwareTable(uint providerSignature, uint tableId, byte[]? buffer, uint bufferSize);
+
+    private const uint IoctlStorageQueryProperty = 0x002D1400;
+    private const uint RsmbProvider = 0x52534D42;
+    private static readonly nint InvalidHandleValue = new(-1);
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string? SystemUuid()
+    {
+        var size = GetSystemFirmwareTable(RsmbProvider, 0, null, 0);
+        if (size is < 8 or > 1024 * 1024)
+        {
+            return null;
+        }
+        var raw = new byte[checked((int)size)];
+        return GetSystemFirmwareTable(RsmbProvider, 0, raw, size) == size
+            ? ParseSystemUuid(raw)
+            : null;
+    }
+
+    internal static string? ParseSystemUuid(byte[] raw)
+    {
+        if (raw.Length < 8)
+        {
+            return null;
+        }
+        var tableLength = BitConverter.ToUInt32(raw, 4);
+        if (tableLength > raw.Length - 8)
+        {
+            return null;
+        }
+        var end = 8 + checked((int)tableLength);
+        for (var offset = 8; offset + 4 <= end;)
+        {
+            var type = raw[offset];
+            var formattedLength = raw[offset + 1];
+            if (formattedLength < 4 || offset + formattedLength > end)
+            {
+                return null;
+            }
+            if (type == 1 && formattedLength >= 24)
+            {
+                var uuid = raw.AsSpan(offset + 8, 16);
+                if (uuid.ToArray().All(b => b == 0) || uuid.ToArray().All(b => b == 0xff))
+                {
+                    return null;
+                }
+                var littleEndianFields = raw[1] > 2 || raw[1] == 2 && raw[2] >= 6;
+                if (littleEndianFields)
+                {
+                    return new Guid(uuid).ToString("D");
+                }
+                return $"{Convert.ToHexString(uuid[..4])}-{Convert.ToHexString(uuid.Slice(4, 2))}-" +
+                       $"{Convert.ToHexString(uuid.Slice(6, 2))}-{Convert.ToHexString(uuid.Slice(8, 2))}-" +
+                       Convert.ToHexString(uuid[10..]);
+            }
+            var next = offset + formattedLength;
+            while (next + 1 < end && (raw[next] != 0 || raw[next + 1] != 0))
+            {
+                next++;
+            }
+            if (next + 1 >= end)
+            {
+                return null;
+            }
+            offset = next + 2;
+            if (type == 127)
+            {
+                break;
+            }
+        }
+        return null;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static IEnumerable<string> PhysicalDiskSerials()
+    {
+        var serials = new List<string>();
+        var query = new byte[12]; // StorageDeviceProperty + PropertyStandardQuery
+        for (var index = 0; index < 32; index++)
+        {
+            var disk = CreateFile($@"\\.\PhysicalDrive{index}", 0, 3, 0, 3, 0, 0);
+            if (disk == InvalidHandleValue)
+            {
+                continue;
+            }
+            try
+            {
+                var header = new byte[8];
+                if (!DeviceIoControl(disk, IoctlStorageQueryProperty, query, (uint)query.Length,
+                        header, (uint)header.Length, out _, 0))
+                {
+                    continue;
+                }
+                var descriptorSize = BitConverter.ToUInt32(header, 4);
+                if (descriptorSize is < 36 or > 1024 * 1024)
+                {
+                    continue;
+                }
+                var descriptor = new byte[descriptorSize];
+                if (!DeviceIoControl(disk, IoctlStorageQueryProperty, query, (uint)query.Length,
+                        descriptor, descriptorSize, out var returned, 0))
+                {
+                    continue;
+                }
+                var serial = ParseStorageSerial(descriptor, returned);
+                if (serial is not null)
+                {
+                    serials.Add(serial);
+                }
+            }
+            finally
+            {
+                CloseHandle(disk);
+            }
+        }
+        return serials;
+    }
+
+    internal static string? ParseStorageSerial(byte[] descriptor, uint returned)
+    {
+        if (returned < 36 || returned > descriptor.Length)
+        {
+            return null;
+        }
+        var returnedLength = checked((int)returned);
+        var offset = BitConverter.ToUInt32(descriptor, 24);
+        if (offset == 0 || offset >= returned)
+        {
+            return null;
+        }
+        var end = (int)offset;
+        while (end < returnedLength && descriptor[end] != 0)
+        {
+            end++;
+        }
+        var value = Encoding.ASCII.GetString(descriptor, (int)offset, end - (int)offset).Trim();
+        return value.Length == 0 ? null : value;
+    }
+
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static string? RamTotal()
     {
@@ -203,26 +393,20 @@ internal static class SLHwidCollectors
     private static string? VolumeSerial()
     {
         var drive = Environment.GetEnvironmentVariable("SystemDrive") ?? "C:";
-        var output = Run("cmd.exe", $"/c vol {drive}");
-        var matches = Regex.Matches(output, "([0-9A-Fa-f]{4}-[0-9A-Fa-f]{4})");
-        return matches.Count > 0 ? matches[^1].Value : null;
-    }
-
-    private static IEnumerable<string> WmicColumn(string entity, string column)
-    {
-        var output = Run("wmic.exe", $"{entity} get {column}");
-        return output.Split('\n')
-            .Select(line => line.Trim())
-            .Where(line => line.Length > 0 && !string.Equals(line, column, StringComparison.OrdinalIgnoreCase));
+        var root = drive.TrimEnd('\\') + "\\";
+        return GetVolumeInformation(root, null, 0, out var serial, out _, out _, null, 0)
+            ? $"{serial >> 16:X4}-{serial & 0xffff:X4}"
+            : null;
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static Dictionary<string, string> WindowsSchemaV2Factors()
     {
-        // WMIC is optional on current Windows releases. Use one best-effort
-        // CIM query for the added SMBIOS and peripheral signals instead.
+        // One PowerShell process obtains the CIM-backed SMBIOS/peripheral
+        // signals. UTF-8 output keeps non-ASCII hardware strings identical to
+        // the native C++ collector. WMIC is never invoked.
         const string script =
-            "$ErrorActionPreference='SilentlyContinue';" +
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;$ErrorActionPreference='SilentlyContinue';" +
             "function Emit($n,$v){$c=@($v|?{$_ -ne $null -and ([string]$_).Trim().Length -gt 0}|%{([string]$_).Trim()}|sort);if($c.Count -gt 0){Write-Output ($n+'='+($c -join '|'))}};" +
             "$p=Get-CimInstance Win32_ComputerSystemProduct;Emit 'system_uuid' $p.UUID;Emit 'system_serial' $p.IdentifyingNumber;" +
             "Emit 'chassis_serial' (Get-CimInstance Win32_SystemEnclosure).SerialNumber;" +
@@ -231,16 +415,9 @@ internal static class SLHwidCollectors
             "Emit 'nic_identity' (Get-CimInstance Win32_NetworkAdapter|?{$_.PhysicalAdapter}).PermanentAddress;" +
             "Emit 'battery_serial' (Get-CimInstance -Namespace root/wmi -ClassName BatteryStaticData).SerialNumber;" +
             "$ek=Get-TpmEndorsementKeyInfo -HashAlgorithm Sha256;if($ek.IsPresent){Emit 'tpm_ek' $ek.PublicKeyHash}";
-        return ParseWindowsSchemaV2Output(
-            Run("powershell.exe", $"-NoProfile -NonInteractive -Command \"{script}\"", 12));
-    }
-
-    // Keep parsing independent of Windows so the collector contract can be
-    // tested without invoking PowerShell, CIM, TPM, or physical hardware.
-    internal static Dictionary<string, string> ParseWindowsSchemaV2Output(string output)
-    {
         var factors = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var line in Run("powershell.exe", $"-NoProfile -NonInteractive -Command \"{script}\"", 6)
+                     .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var separator = line.IndexOf('=');
             if (separator > 0 && separator + 1 < line.Length)
@@ -542,6 +719,8 @@ internal static class SLHwidCollectors
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
             };
             using var process = Process.Start(info);
             if (process is null)
@@ -563,7 +742,7 @@ internal static class SLHwidCollectors
                 }
                 return "";
             }
-            errors.GetAwaiter().GetResult(); // drain diagnostics; collection is best-effort
+            errors.GetAwaiter().GetResult(); // drain diagnostics; collectors are deliberately best-effort
             return output.GetAwaiter().GetResult();
         }
         catch
