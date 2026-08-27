@@ -43,11 +43,18 @@ public sealed class SimpleConfig
     /// <summary>System Locker API root. HTTPS is enforced.</summary>
     public string BaseUrl { get; set; } = "https://systemlocker.net";
 
+    /// <summary>Invisible Folder root. HTTPS is enforced.</summary>
+    public string InvisibleFolderBaseUrl { get; set; } = "https://invisiblefolder.net";
+
     /// <summary>User agent reported to the server.</summary>
-    public string UserAgent { get; set; } = "systemlocker-simple-dotnet/0.1";
+    public string UserAgent { get; set; } = "systemlocker-simple-dotnet/1.0.0";
 
     /// <summary>Optional program digest, checked against the system's expected digest.</summary>
     public string? ProgramDigest { get; set; }
+
+    /// <summary>Optional API key for Invisible Folder metadata of non-Advanced
+    /// files (API Available, Password Protected, System Locker Simple).</summary>
+    public string? InvisibleFolderApiKey { get; set; }
 
     /// <summary>Optional management API key; only needed for the
     /// <see cref="Management"/> sub-API.</summary>

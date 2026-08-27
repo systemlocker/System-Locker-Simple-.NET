@@ -129,6 +129,9 @@ public sealed class SimpleClient
     /// <see cref="SimpleConfig.ApiKey"/>.</summary>
     public Management Management => new(this);
 
+    /// <summary>The Invisible Folder module (GET downloads and metadata).</summary>
+    public InvisibleFolder InvisibleFolder => new(this);
+
     // ── authentication ───────────────────────────────────────────────
 
     /// <summary>Checks a license key (key-only mode). Returns true only when

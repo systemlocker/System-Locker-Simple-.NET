@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PackageId>SystemLocker.Simple</PackageId>
-    <Version>0.1.0</Version>
+    <Version>1.0.0</Version>
     <Authors>System Locker</Authors>
     <Description>Official System Locker Simple client for .NET — a stateless license check for software running on machines you control.</Description>
     <PackageProjectUrl>https://github.com/systemlocker/System-Locker-Simple-NET</PackageProjectUrl>

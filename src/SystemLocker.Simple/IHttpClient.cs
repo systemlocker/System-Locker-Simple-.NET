@@ -16,11 +16,13 @@ public sealed class HttpExchange
         Headers.TryGetValue(name, out var value) ? value : "";
 }
 
-/// <summary>Abstraction over the protocol's single POST operation; implement
-/// to inject a fake transport in tests.</summary>
+/// <summary>Abstraction over the protocol's HTTP operations; implement to
+/// inject a fake transport in tests.</summary>
 public interface IHttpClient
 {
     Task<HttpExchange> PostFormAsync(string url, IEnumerable<KeyValuePair<string, string>> fields, CancellationToken cancellationToken = default);
+
+    Task<HttpExchange> GetAsync(string url, IReadOnlyDictionary<string, string>? headers = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Default transport over <see cref="HttpClient"/>.</summary>
@@ -40,10 +42,28 @@ public sealed class DefaultHttpClient : IHttpClient
 
     public async Task<HttpExchange> PostFormAsync(string url, IEnumerable<KeyValuePair<string, string>> fields, CancellationToken cancellationToken = default)
     {
+        using var content = new FormUrlEncodedContent(fields);
+        using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+        return await SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<HttpExchange> GetAsync(string url, IReadOnlyDictionary<string, string>? headers = null, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (headers is not null)
+        {
+            foreach (var (name, value) in headers)
+            {
+                request.Headers.TryAddWithoutValidation(name, value);
+            }
+        }
+        return await SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<HttpExchange> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
         try
         {
-            using var content = new FormUrlEncodedContent(fields);
-            using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
             using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
             {
