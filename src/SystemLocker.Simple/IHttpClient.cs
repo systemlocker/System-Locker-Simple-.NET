@@ -64,7 +64,11 @@ public sealed class DefaultHttpClient : IHttpClient
     {
         try
         {
-            using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            // ResponseHeadersRead is required for the limit below to protect
+            // allocation; the default completion mode buffers the entire body
+            // before SendAsync returns.
+            using var response = await _client.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             if (response.Content.Headers.ContentLength is > MaxResponseBytes)
             {
                 return new HttpExchange { StatusCode = (int)response.StatusCode, TransportError = "response body exceeds 1 MiB limit" };
@@ -87,13 +91,13 @@ public sealed class DefaultHttpClient : IHttpClient
             }
             return new HttpExchange { StatusCode = (int)response.StatusCode, Body = body, Headers = headers };
         }
-        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or InvalidDataException)
+        catch (Exception error) when (error is HttpRequestException or TaskCanceledException or IOException)
         {
             return new HttpExchange { TransportError = error.Message };
         }
     }
 
-    private static async Task<byte[]> ReadBoundedBodyAsync(HttpContent content, CancellationToken cancellationToken)
+    internal static async Task<byte[]> ReadBoundedBodyAsync(HttpContent content, CancellationToken cancellationToken)
     {
         await using var input = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using var output = new MemoryStream();
