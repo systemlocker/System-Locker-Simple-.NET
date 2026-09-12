@@ -152,5 +152,10 @@ Set `Hwid = "1"` only to explicitly disable device locking. An explicit
 
 ## Security
 
+> [!WARNING]
+> Watch this repository (Watch → Custom → Releases) and update your
+> dependency when a release ships: releases regularly add security
+> enhancements.
+
 See [SECURITY.md](SECURITY.md). Report vulnerabilities privately through the
 System Locker support channels, not via public issues.
