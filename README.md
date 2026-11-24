@@ -69,9 +69,31 @@ int count = await client.Management.RedeemedUserCountAsync();
 string keys = await client.Management.GenerateKeysAsync(KeyExpiry.OneMonth, 10, "june-batch");
 ```
 
-`Management` wraps `POST /api/v1`: key status/expiration, HWID resets (single
-or whole-system), key generation, bans, expiry adjustment. The API key grants
-all of it — keep it on servers you control.
+Management uses the Management API v2 (`/api/v2`). Set `SimpleConfig.ApiKey` to a
+scoped `slm_…` bearer credential created for this system, and keep it on
+servers you control. Authentication does not use it.
+
+`PermissionsAsync()` lists the credential's scopes, and `RequestAsync(method, path, data)` calls any v2
+resource path, such as `/systems/{systemId}/nightflyer`, returning
+the response's `data` as a `JsonElement`. The server enforces each credential's scopes.
+A non-2xx response throws a `SimpleError` whose `Reason` is the server's error code, such as `INSUFFICIENT_SCOPE`.
+
+| Helper | Scope |
+| --- | --- |
+| User count (refreshed periodically by the server) | `systems.read` |
+| Key status (`user`, `mikros` or `unclaimed`) and expiry | `keys.read` |
+| Key generation (duration presets start at redemption; one key per line) | `keys.create` |
+| Administrative HWID resets and `AddTimeAsync(license, seconds)` | `keys.update` |
+| Key deletion | `keys.delete` |
+
+Mutation helpers return the response's JSON data as text. A key with no
+fixed expiry is reported as permanent only once redeemed: an unredeemed
+duration key has no expiry timestamp yet either.
+
+**Upgrading from the previous management API:** `ResetHwidAsync(license)` no longer takes an `asAdmin` argument; self-service resets
+stay on `SimpleClient.ResetHwidForKeyAsync`. `AdjustExpiryAsync` has been removed because there is no
+equivalent v2 operation — use `AddTimeAsync(license, seconds)` to extend a key instead.
+Custom `IHttpClient` implementations must implement `RequestJsonAsync` to use management; form-only clients keep working for authentication.
 
 ## Google SSO (account authentication)
 

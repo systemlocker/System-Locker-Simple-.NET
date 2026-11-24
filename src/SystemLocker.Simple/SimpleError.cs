@@ -52,7 +52,7 @@ internal static class Reasons
 {
     private static readonly HashSet<string> DeniedReasons =
     [
-        "no username", "no password", "no key", "no sys", "no hwid",
+        "NIGHTFLYER_LEASE_ACTIVE", "no version", "no username", "no password", "no key", "no sys", "no hwid",
         "false", // missing version
         "not verified", "bad u/p", "bad key", "bad keys", "frozen", "paused",
         "destitute", "user limit", "hwid banned", "spoofsuspected", "hwid",

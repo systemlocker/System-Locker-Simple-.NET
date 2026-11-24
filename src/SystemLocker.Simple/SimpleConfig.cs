@@ -47,7 +47,7 @@ public sealed class SimpleConfig
     public string InvisibleFolderBaseUrl { get; set; } = "https://invisiblefolder.net";
 
     /// <summary>User agent reported to the server.</summary>
-    public string UserAgent { get; set; } = "systemlocker-simple-dotnet/1.2.0";
+    public string UserAgent { get; set; } = "systemlocker-simple-dotnet/2.0.0";
 
     /// <summary>Optional program digest, checked against the system's expected digest.</summary>
     public string? ProgramDigest { get; set; }
@@ -56,7 +56,7 @@ public sealed class SimpleConfig
     /// files (API Available, Password Protected, System Locker Simple).</summary>
     public string? InvisibleFolderApiKey { get; set; }
 
-    /// <summary>Optional management API key; only needed for the
+    /// <summary>Optional scoped v2 management bearer credential; only needed for the
     /// <see cref="Management"/> sub-API.</summary>
     public string? ApiKey { get; set; }
 }

@@ -6,13 +6,20 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <PackageId>SystemLocker.Simple</PackageId>
-    <Version>1.2.0</Version>
+    <Version>2.0.0</Version>
     <Authors>System Locker</Authors>
     <Description>Official System Locker Simple client for .NET — a stateless license check for software running on machines you control.</Description>
     <PackageProjectUrl>https://github.com/systemlocker/System-Locker-Simple-NET</PackageProjectUrl>
     <RepositoryUrl>https://github.com/systemlocker/System-Locker-Simple-NET</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
+  </ItemGroup>
 
 </Project>

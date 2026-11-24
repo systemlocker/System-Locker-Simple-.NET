@@ -22,6 +22,16 @@ public interface IHttpClient
 {
     Task<HttpExchange> PostFormAsync(string url, IEnumerable<KeyValuePair<string, string>> fields, CancellationToken cancellationToken = default);
 
+    /// <summary>Sends a Management API request. <paramref name="json"/>, when
+    /// not null, is the body with <c>Content-Type: application/json</c>.
+    /// Authentication keeps using <see cref="PostFormAsync"/>.</summary>
+    /// <remarks>The default implementation keeps transports written before
+    /// Management API v2 source-compatible: they still authenticate, and
+    /// management calls through them fail with a transport error until they
+    /// implement this method.</remarks>
+    Task<HttpExchange> RequestJsonAsync(string method, string url, string? json, IReadOnlyDictionary<string, string> headers, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new HttpExchange { TransportError = "HTTP client must implement RequestJsonAsync for management" });
+
     Task<HttpExchange> GetAsync(string url, IReadOnlyDictionary<string, string>? headers = null, CancellationToken cancellationToken = default);
 }
 
@@ -57,6 +67,14 @@ public sealed class DefaultHttpClient : IHttpClient
                 request.Headers.TryAddWithoutValidation(name, value);
             }
         }
+        return await SendAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<HttpExchange> RequestJsonAsync(string method, string url, string? json, IReadOnlyDictionary<string, string> headers, CancellationToken cancellationToken = default)
+    {
+        using var request = new HttpRequestMessage(new HttpMethod(method), url);
+        if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        foreach (var (name, value) in headers) request.Headers.Add(name, value);
         return await SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
